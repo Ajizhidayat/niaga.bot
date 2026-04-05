@@ -12,22 +12,22 @@ const openai = new OpenAI({
   baseURL: "https://openrouter.ai/api/v1"
 });
 
-// 🔥 FUNGSI 1: Ambil Data dari Google Sheet (Membaca)
+// 🔥 FUNGSI 1: Ambil Data dari Google Sheet (Membaca Saja)
 async function getSpreadsheetData() {
   try {
     const auth = new google.auth.GoogleAuth({
       credentials: JSON.parse(process.env.GOOGLE_CONFIG),
-      scopes: ['https://www.googleapis.com/auth/spreadsheets']
+      scopes: ['https://www.googleapis.com/auth/spreadsheets.readonly']
     });
 
     const sheets = google.sheets({ version: 'v4', auth });
     const res = await sheets.spreadsheets.values.get({
       spreadsheetId: process.env.GOOGLE_SHEET_ID,
-      range: 'sheet1!A2:C'
+      range: 'Sheet1!A2:C' // ⚠️ PASTIKAN NAMA TAB DI GOOGLE SHEET ADALAH 'Sheet1'
     });
 
     const rows = res.data.values;
-    if (!rows || rows.length === 0) return "Tidak ada data FAQ.";
+    if (!rows || rows.length === 0) return "Tidak ada data pengetahuan spesifik.";
 
     let faqContext = "Berikut adalah data pengetahuan toko kami:\n";
     rows.forEach(row => {
@@ -39,37 +39,18 @@ async function getSpreadsheetData() {
     return faqContext;
   } catch (err) {
     console.error("GDocs Read Error:", err.message);
-    return "Data FAQ tidak tersedia.";
+    return "Data FAQ sedang tidak tersedia, jawablah sebisa mungkin dengan ramah.";
   }
 }
 
-// 🔥 FUNGSI 2: Catat Pertanyaan Baru (Menulis)
-async function logUnansweredQuestion(category, question) {
-  try {
-    const auth = new google.auth.GoogleAuth({
-      credentials: JSON.parse(process.env.GOOGLE_CONFIG),
-      scopes: ['https://www.googleapis.com/auth/spreadsheets']
-    });
-
-    const sheets = google.sheets({ version: 'v4', auth });
-    await sheets.spreadsheets.values.append({
-      spreadsheetId: process.env.GOOGLE_SHEET_ID,
-      range: 'sheet1!A2:C', 
-      valueInputOption: 'USER_ENTERED',
-      requestBody: {
-        values: [[category, question, "BELUM ADA JAWABAN (Tolong Isi)"]]
-      }
-    });
-    console.log("Pertanyaan baru otomatis dicatat ke Sheets!");
-  } catch (err) {
-    console.error("GDocs Write Error:", err.message);
-  }
-}
-
-// 🔥 WEBHOOK UTAMA
+// 🔥 WEBHOOK UTAMA (Penerima Pesan)
 app.post('/wa-inbound', async (req, res) => {
   try {
     const data = req.body.data || req.body;
+    
+    // Validasi data masuk
+    if (!data || !data.body || !data.from) return res.send("OK");
+
     const message = data.body;
     const from = data.from.replace('@c.us', '');
 
@@ -77,51 +58,32 @@ app.post('/wa-inbound', async (req, res) => {
 
     // 1. Ambil data Sheet
     const sheetData = await getSpreadsheetData();
-    // DEBUG: Cek di console log, apakah sheetData ada isinya?
-    console.log("ISI DATA SHEET:", sheetData);
 
-    if (!sheetData || sheetData.includes("tidak tersedia")) {
-      console.log("WARNING: Data Sheet Kosong!");
-    }
-
+    // 2. Proses dengan AI (Gunakan model yang stabil)
     let aiReply = "";
-
-    // 2. Proses dengan AI
     try {
       const completion = await openai.chat.completions.create({
-        model: "qwen/qwen3.6-plus:free", // Gunakan model yang stabil
+        model: "google/gemini-2.0-flash-exp:free", // Model ini paling jarang Error 429
         messages: [
           { 
             role: "system", 
-            content: `Kamu adalah CS AI yang sangat membantu. Kamu diberikan DATA PENGETAHUAN di bawah ini untuk menjawab user.
+            content: `Kamu adalah CS AI yang ramah. Gunakan DATA PENGETAHUAN di bawah ini untuk menjawab user. Jika tidak ada di data, jawablah secara umum dan arahkan untuk hubungi admin di wa.me/6281284520257.
             
             DATA PENGETAHUAN:
-            ${sheetData}
-
-            TUGAS:
-            - Cari jawaban yang PALING RELEVAN dari data di atas.
-            - Jika pertanyaan user ada kemiripan makna dengan data, berikan jawabannya.
-            - HANYA jika benar-benar tidak ada di data, jawab: [TIDAK_ADA]` 
+            ${sheetData}` 
           },
           { role: "user", content: message }
         ],
-        temperature: 0.3 // Supaya AI lebih fokus pada data
+        temperature: 0.5 
       });
 
       aiReply = completion.choices[0].message.content;
-
-      // 3. Logika jika data tidak ada
-      if (aiReply.includes("[TIDAK_ADA]")) {
-        await logUnansweredQuestion("Auto-Log", message);
-        aiReply = "Maaf, pertanyaan itu belum ada di database kami. Sudah kami catat untuk dijawab admin ya! Hubungi admin: wa.me/6281284520257";
-      }
-
     } catch (err) {
-      console.log("AI Error:", err.message);
-      aiReply = "Aduh, otak AI-nya lagi loading. Coba tanya lagi ya!";
+      console.error("AI Error:", err.message);
+      aiReply = "Maaf kak, layanan sedang sibuk. Bisa coba tanya lagi sebentar lagi? 🙏";
     }
 
-    // 4. Kirim Balasan ke WhatsApp
+    // 3. Kirim Balasan ke WhatsApp via UltraMsg
     await axios.post(
       `https://api.ultramsg.com/${process.env.ULTRAMSG_INSTANCE}/messages/chat`,
       {
@@ -131,14 +93,17 @@ app.post('/wa-inbound', async (req, res) => {
       }
     );
 
+    console.log("Respon terkirim ke:", from);
     res.send("OK");
+
   } catch (err) {
     console.log("SERVER ERROR:", err.message);
-    res.status(500).send("ERROR");
+    res.status(200).send("OK"); // Kirim OK agar Ultramsg tidak terus mencoba ulang
   }
 });
 
+// 🔥 Jalankan Server
 const PORT = process.env.PORT || 8080;
 app.listen(PORT, '0.0.0.0', () => {
-  console.log("Server jalan di port: " + PORT);
+  console.log("Server Jalan Normal di Port: " + PORT);
 });
