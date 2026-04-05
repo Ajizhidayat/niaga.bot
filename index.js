@@ -21,7 +21,7 @@ console.log("API KEY:", process.env.OPENROUTER_API_KEY);
 async function getGoogleDoc() {
   try {
     const auth = new google.auth.GoogleAuth({
-      keyFile: 'credentials.json',
+      credentials: JSON.parse(process.env.GOOGLE_CONFIG),
       scopes: ['https://www.googleapis.com/auth/documents.readonly']
     })
 
@@ -87,8 +87,9 @@ app.post('/wa-inbound', async (req, res) => {
   }
 })
 
-app.listen(process.env.PORT, () => {
-  console.log("Server jalan di http://localhost:" + process.env.PORT)
+const PORT= process.env.PORT || 8080
+app.listen(PORT,'0.0.0.0', () => {
+  console.log("Server jalan di http://localhost:" + PORT)
 })
 
 // 🔥 test AI
