@@ -63,7 +63,7 @@ app.post('/wa-inbound', async (req, res) => {
     let aiReply = "";
     try {
       const completion = await openai.chat.completions.create({
-        model: "qwen/qwen3.6-plus:free", // Model ini paling jarang Error 429
+        model: "nvidia/nemotron-3-super-120b-a12b:free", // Model ini paling jarang Error 429
         messages: [
           { 
             role: "system", 
