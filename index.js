@@ -23,7 +23,7 @@ async function getSpreadsheetData() {
     const sheets = google.sheets({ version: 'v4', auth });
     const res = await sheets.spreadsheets.values.get({
       spreadsheetId: process.env.GOOGLE_SHEET_ID,
-      range: 'FAQ BOT!A2:C'
+      range: 'sheet1!A2:C'
     });
 
     const rows = res.data.values;
@@ -54,7 +54,7 @@ async function logUnansweredQuestion(category, question) {
     const sheets = google.sheets({ version: 'v4', auth });
     await sheets.spreadsheets.values.append({
       spreadsheetId: process.env.GOOGLE_SHEET_ID,
-      range: 'FAQ BOT!A:C', 
+      range: 'sheet1!A2:C', 
       valueInputOption: 'USER_ENTERED',
       requestBody: {
         values: [[category, question, "BELUM ADA JAWABAN (Tolong Isi)"]]
@@ -77,19 +77,35 @@ app.post('/wa-inbound', async (req, res) => {
 
     // 1. Ambil data Sheet
     const sheetData = await getSpreadsheetData();
-    let aiReply = "Maaf, bot sedang gangguan 🥰";
+    // DEBUG: Cek di console log, apakah sheetData ada isinya?
+    console.log("ISI DATA SHEET:", sheetData);
+
+    if (!sheetData || sheetData.includes("tidak tersedia")) {
+      console.log("WARNING: Data Sheet Kosong!");
+    }
+
+    let aiReply = "";
 
     // 2. Proses dengan AI
     try {
       const completion = await openai.chat.completions.create({
-        model: "qwen/qwen-turbo", // Gunakan model yang stabil
+        model: "qwen/qwen3.6-plus:free", // Gunakan model yang stabil
         messages: [
           { 
             role: "system", 
-            content: `Kamu adalah CS AI UMKM. Jawab berdasarkan data ini:\n${sheetData}\n\nATURAN: Jika pertanyaan user TIDAK ADA di data, jawab HANYA dengan kata: [TIDAK_ADA]` 
+            content: `Kamu adalah CS AI yang sangat membantu. Kamu diberikan DATA PENGETAHUAN di bawah ini untuk menjawab user.
+            
+            DATA PENGETAHUAN:
+            ${sheetData}
+
+            TUGAS:
+            - Cari jawaban yang PALING RELEVAN dari data di atas.
+            - Jika pertanyaan user ada kemiripan makna dengan data, berikan jawabannya.
+            - HANYA jika benar-benar tidak ada di data, jawab: [TIDAK_ADA]` 
           },
           { role: "user", content: message }
-        ]
+        ],
+        temperature: 0.3 // Supaya AI lebih fokus pada data
       });
 
       aiReply = completion.choices[0].message.content;
