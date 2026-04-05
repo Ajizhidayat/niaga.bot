@@ -18,7 +18,7 @@ const openai = new OpenAI({
 console.log("API KEY:", process.env.OPENROUTER_API_KEY);
 
 // 🔥 ambil isi Google Sheet
-async function SpreadsheetData() {
+async function getSpreadsheetData() {
   try {
     const auth = new google.auth.GoogleAuth({
       credentials: JSON.parse(process.env.GOOGLE_CONFIG),
@@ -32,19 +32,22 @@ async function SpreadsheetData() {
     })
 
     const rows = res.data.values;
+    if (!rows || rows.length === 0) return "Tidak ada data FAQ.";
 
-    if (!rows) return "Tidak ada data";
+    let faqContext = "Berikut adalah data pengetahuan toko kami:\n";
+
     let text = "";
-
     rows.forEach(row => {
-      text += `\n${row[1]}: ${row[2]}`;
+      // row[0] = Kategori, row[1] = Keyword/Tanya, row[2] = Jawaban
+      if (row[1] && row[2]) {
+        faqContext += `- Kategori ${row[0] || 'Umum'}: Jika ditanya tentang "${row[1]}", jawabannya adalah: "${row[2]}"\n`;
+      }
     });
 
-    return text;
-
+  return faqContext;
   } catch (err) {
-    console.log("Sheets error:", err.message);
-    return "";
+    console.error("Sheets error:", err.message);
+    return "Data FAQ saat ini tidak tersedia.";
   }
 }
 
@@ -67,7 +70,16 @@ app.post('/wa-inbound', async (req, res) => {
       const ai = await openai.chat.completions.create({
         model: "qwen/qwen3.6-plus:free", // ✅ FIX MODEL
         messages: [
-          { role: "system", content: `Kamu adalah CS UMKM yang ramah dan inforamtif. ${knowledge}` },
+          { role: "system", content: `Kamu adalah CS AI yang cerdas dan ramah.
+            Tugasmu menjawab pertanyaan pelanggan berdasarkan DATA FAQ di bawah ini.
+      
+      ATURAN:
+      1. Jika pertanyaan pelanggan mirip dengan 'Keyword' di data, berikan 'Jawaban' yang sesuai.
+      2. Gunakan gaya bahasa yang santai dan solutif.
+      3. Jika pertanyaan tidak ada di data, arahkan pelanggan untuk menghubungi admin di https://wa.me/6281284520257.
+      
+      DATA FAQ:
+      ${sheetData}` },
           { role: "user", content: message }
         ]
       });
