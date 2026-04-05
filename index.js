@@ -17,27 +17,34 @@ const openai = new OpenAI({
 
 console.log("API KEY:", process.env.OPENROUTER_API_KEY);
 
-// 🔥 ambil isi Google Docs
-async function getGoogleDoc() {
+// 🔥 ambil isi Google Sheet
+async function SpreadsheetData() {
   try {
     const auth = new google.auth.GoogleAuth({
       credentials: JSON.parse(process.env.GOOGLE_CONFIG),
-      scopes: ['https://www.googleapis.com/auth/documents.readonly']
+      scopes: ['https://www.googleapis.com/auth/spreadsheets.readonly']
     })
 
-    const docs = google.docs({ version: 'v1', auth })
-    const res = await docs.documents.get({
-      documentId: process.env.GOOGLE_DOC_ID
+    const sheets = google.sheets({ version: 'v4', auth });
+    const res = await sheets.spreadsheets.values.get({
+      spreadsheetId: process.env.GOOGLE_SHEET_ID,
+      range: 'FAQ BOT!A2:C'
     })
 
-    const content = res.data.body.content
-      .map(item => item.paragraph?.elements?.map(e => e.textRun?.content).join(''))
-      .join('')
+    const rows = res.data.values;
 
-    return content || "Tidak ada data"
+    if (!rows) return "Tidak ada data";
+    let text = "";
+
+    rows.forEach(row => {
+      text += `\n${row[1]}: ${row[2]}`;
+    });
+
+    return text;
+
   } catch (err) {
-    console.log("GDocs error:", err.message)
-    return ""
+    console.log("Sheets error:", err.message);
+    return "";
   }
 }
 
@@ -51,15 +58,16 @@ app.post('/wa-inbound', async (req, res) => {
     console.log("Pesan:", message);
     console.log("Kirim ke:", from);
 
-    const knowledge = await getGoogleDoc()
+    const sheetData = await getSpreadsheetData();
+    const reply = findAnswer(message, sheetData);
 
-    let reply = "Maaf, bot lagi error 🙏";
+    if(!reply)
 
     try {
       const ai = await openai.chat.completions.create({
         model: "qwen/qwen3.6-plus:free", // ✅ FIX MODEL
         messages: [
-          { role: "system", content: `Kamu adalah CS UMKM. ${knowledge}` },
+          { role: "system", content: `Kamu adalah CS UMKM yang ramah dan inforamtif. ${knowledge}` },
           { role: "user", content: message }
         ]
       });
@@ -67,6 +75,7 @@ app.post('/wa-inbound', async (req, res) => {
       reply = ai.choices[0].message.content // ✅ FIX SCOPE
     } catch (err) {
       console.log("AI Error:", err.message);
+      reply="maff bot lagi error, coba beberapa saat lagi yaa 🥰"
     }
 
     const send = await axios.post(
@@ -78,7 +87,7 @@ app.post('/wa-inbound', async (req, res) => {
       }
     )
 
-    console.log("ULTRAMSG RESPONSE:", send.data);
+    console.log("ULTRAMSG RESPONSE:", send.data);gi
 
     res.send("OK")
   } catch (err) {
@@ -92,21 +101,3 @@ app.listen(PORT,'0.0.0.0', () => {
   console.log("Server jalan di http://localhost:" + PORT)
 })
 
-// 🔥 test AI
-// async function testAI() {
-//   try {
-//     const res = await openai.chat.completions.create({
-//       model: "qwen/qwen3.6-plus:free",
-//       messages: [
-//         { role: "user", content: "halo" }
-//       ]
-//     });
-
-//     console.log("AI RESPONSE:", res.choices[0].message.content);
-
-//   } catch (err) {
-//     console.log("AI ERROR:", err.message);
-//   }
-// }
-
-// testAI();
